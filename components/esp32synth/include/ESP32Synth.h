@@ -14,7 +14,8 @@
 #include <cstdio>
 #include "driver/i2s_pdm.h"
 #include "driver/i2s_std.h"
-#include "ESP32SynthNotes.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
 #if defined(CONFIG_IDF_TARGET_ESP32)
 #include "driver/dac_continuous.h"

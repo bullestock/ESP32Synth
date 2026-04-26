@@ -3,6 +3,7 @@
 #pragma GCC optimize ("O3,unroll-loops")
 #include "ESP32Synth.h"
 #include <stdio.h>
+#include <cstring>
 #include "esp_timer.h"
 
 // ====================================================================================
