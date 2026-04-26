@@ -8,7 +8,7 @@
 #ifndef ESP32_SYNTH_H
 #define ESP32_SYNTH_H
 
-#include <Arduino.h>
+#include "Arduino.h"
 #include <math.h>
 #include <FS.h>
 #include "driver/i2s_pdm.h"
