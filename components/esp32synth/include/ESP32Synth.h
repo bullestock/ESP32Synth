@@ -8,9 +8,10 @@
 #ifndef ESP32_SYNTH_H
 #define ESP32_SYNTH_H
 
-#include "Arduino.h"
-#include <math.h>
-#include <FS.h>
+#include <stdint.h>
+#include <stddef.h>
+#include <cmath>
+#include <cstdio>
 #include "driver/i2s_pdm.h"
 #include "driver/i2s_std.h"
 #include "ESP32SynthNotes.h"
@@ -143,7 +144,7 @@ struct Instrument_Sample {
 };
 
 struct StreamTrack {
-    fs::File          file;
+    FILE*              file;
     int16_t           buffer[STREAM_BUF_SAMPLES];
     volatile uint16_t head;
     volatile uint16_t tail;
@@ -312,8 +313,8 @@ public:
     void detachArpeggio(uint16_t voice);
 
     // --- SD Streaming ---
-    int8_t   setupStream(uint16_t voice, fs::FS &fs, const char* path, uint32_t rootFreqCentiHz = 26163, bool loop = false);
-    int8_t playStream(uint16_t voice, fs::FS &fs, const char* path, uint16_t volume = 255, uint32_t rootFreqCentiHz = 26163, bool loop = false);
+    int8_t   setupStream(uint16_t voice, const char* path, uint32_t rootFreqCentiHz = 26163, bool loop = false);
+    int8_t playStream(uint16_t voice, const char* path, uint16_t volume = 255, uint32_t rootFreqCentiHz = 26163, bool loop = false);
     void     pauseStream(uint16_t voice);
     void     resumeStream(uint16_t voice);
     void     stopStream(uint16_t voice);
@@ -350,7 +351,7 @@ private:
     TaskHandle_t  audioTaskHandle = NULL;
     volatile bool _running = false;
     static void   sdLoaderTask(void* param);
-    bool parseWavHeader(fs::File& file, uint32_t& outSampleRate, uint32_t& outDataPos, uint32_t& outDataSize, uint16_t& outChannels, uint16_t& outBits);
+    bool parseWavHeader(FILE* file, uint32_t& outSampleRate, uint32_t& outDataPos, uint32_t& outDataSize, uint16_t& outChannels, uint16_t& outBits);
     
     Voice          voices[MAX_VOICES];
     WavetableEntry wavetables[MAX_WAVETABLES];

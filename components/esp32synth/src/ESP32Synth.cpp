@@ -2,6 +2,8 @@
 // Se não fosse por Deus, o ESP32Synth nunca teria dado certo, então agradeçam a Ele por essa maravilha de código que é o ESP32Synth. Amém!
 #pragma GCC optimize ("O3,unroll-loops")
 #include "ESP32Synth.h"
+#include <stdio.h>
+#include "esp_timer.h"
 
 // ====================================================================================
 //    SINE WAVE LOOK-UP TABLE
@@ -512,7 +514,7 @@ void ESP32Synth::end() {
         if (streams[i].active) {
             streams[i].playing = false;
             streams[i].active = false;
-            if (streams[i].file) streams[i].file.close();
+            if (streams[i].file) { fclose(streams[i].file); streams[i].file = NULL; }
         }
     }
 
@@ -761,7 +763,7 @@ void ESP32Synth::noteOn(uint16_t voice, uint32_t freqCentiHz, uint16_t volume) {
 
     } else { // Standard voice types
         if (vo->type == WAVE_NOISE) {
-            vo->rngState += micros(); // Re-seed
+            vo->rngState += (uint32_t)(esp_timer_get_time() & 0xFFFFFFFFU); // Re-seed using esp_timer
         } else if (vo->type == WAVE_SAMPLE) {
             vo->sampleFinished = false;
             const SampleData* sData = &registeredSamples[vo->curSampleId];
@@ -1090,7 +1092,7 @@ void ESP32Synth::detachArpeggio(uint16_t voice) {
 
 // --- SD Streaming ---
 
-int8_t ESP32Synth::setupStream(uint16_t voice, fs::FS &fs, const char* path, uint32_t rootFreqCentiHz, bool loop) {
+int8_t ESP32Synth::setupStream(uint16_t voice, const char* path, uint32_t rootFreqCentiHz, bool loop) {
     if (voice >= MAX_VOICES) return -1;
 
     // Start SD Task on-demand
@@ -1110,17 +1112,17 @@ int8_t ESP32Synth::setupStream(uint16_t voice, fs::FS &fs, const char* path, uin
     }
     if (streamId == -1) return -1; // No free stream tracks
 
-    fs::File file = fs.open(path, "r");
+    FILE* file = fopen(path, "rb");
     if (!file) return -1;
 
     uint32_t sRate, dPos, dSize;
     uint16_t channels, bits;
     
     if (!parseWavHeader(file, sRate, dPos, dSize, channels, bits)) {
-        file.close();
+        fclose(file);
         return -1;
     }
-    file.seek(dPos);
+    fseek(file, (long)dPos, SEEK_SET);
 
     StreamTrack* trk = &streams[streamId];
     *trk = {}; // Clear stream track before use
@@ -1148,10 +1150,10 @@ int8_t ESP32Synth::setupStream(uint16_t voice, fs::FS &fs, const char* path, uin
     return streamId;
 }
 
-int8_t ESP32Synth::playStream(uint16_t voice, fs::FS &fs, const char* path, uint16_t volume, uint32_t rootFreqCentiHz, bool loop) {
+int8_t ESP32Synth::playStream(uint16_t voice, const char* path, uint16_t volume, uint32_t rootFreqCentiHz, bool loop) {
     if (voice >= MAX_VOICES) return -1;
     
-    int8_t streamId = setupStream(voice, fs, path, rootFreqCentiHz, loop);
+    int8_t streamId = setupStream(voice, path, rootFreqCentiHz, loop);
     if(streamId < 0) return -1;
     
     StreamTrack* trk = &streams[streamId];
@@ -1203,7 +1205,7 @@ void ESP32Synth::stopStream(uint16_t voice) {
         trk->playing = false;
         trk->active = false;
         
-        if (trk->file) trk->file.close();
+        if (trk->file) { fclose(trk->file); trk->file = NULL; }
         voices[voice].streamTrackId = -1;
     }
 }
@@ -1491,58 +1493,66 @@ void IRAM_ATTR ESP32Synth::render(void* buffer, int samples) {
 }
 
 // WAV Header Parser
-bool ESP32Synth::parseWavHeader(fs::File& file, uint32_t& outSampleRate, uint32_t& outDataPos, uint32_t& outDataSize, uint16_t& outChannels, uint16_t& outBits) {
-    file.seek(0);
+bool ESP32Synth::parseWavHeader(FILE* file, uint32_t& outSampleRate, uint32_t& outDataPos, uint32_t& outDataSize, uint16_t& outChannels, uint16_t& outBits) {
+    if (!file) return false;
+    fseek(file, 0, SEEK_END);
+    long fsize = ftell(file);
+    fseek(file, 0, SEEK_SET);
+
     uint8_t riff[12];
-    if (file.read(riff, 12) != 12) return false;
-    
+    if (fread(riff, 1, 12, file) != 12) return false;
+
     // Check RIFF + fallback search
     if (strncmp((char*)riff, "RIFF", 4) != 0) {
-        file.seek(0);
+        fseek(file, 0, SEEK_SET);
         bool foundRiff = false;
-        for(int i = 0; i < 8192; i++) {
-            if (file.read() == 'R' && file.peek() == 'I') {
-                file.seek(file.position() - 1);
-                if (file.read(riff, 12) == 12 && strncmp((char*)riff, "RIFF", 4) == 0) {
-                    foundRiff = true; break;
+        long maxSearch = (fsize < 8192) ? fsize : 8192;
+        for (long i = 0; i < maxSearch - 1; i++) {
+            int c = fgetc(file);
+            if (c == 'R') {
+                int c2 = fgetc(file);
+                if (c2 == 'I') {
+                    fseek(file, ftell(file) - 1, SEEK_SET);
+                    if (fread(riff, 1, 12, file) == 12 && strncmp((char*)riff, "RIFF", 4) == 0) { foundRiff = true; break; }
+                    fseek(file, ftell(file) - 11, SEEK_SET); // step back keeping scan progressing
+                } else {
+                    fseek(file, ftell(file) - 1, SEEK_SET);
                 }
             }
         }
-        if(!foundRiff) return false;
+        if (!foundRiff) return false;
     }
 
     uint32_t tempSampleRate = 48000;
     uint16_t tempChannels = 1;
     uint16_t tempBits = 16;
     uint32_t tempDataPos = 44;
-    uint32_t tempDataSize = file.size() - 44;
+    uint32_t tempDataSize = (fsize > 44) ? (uint32_t)(fsize - 44) : 0;
     bool foundData = false;
 
-    // Parse chunks
-    while (file.available() >= 8) {
-        uint8_t chunkId[4]; file.read(chunkId, 4);
-        uint8_t szBuf[4];   file.read(szBuf, 4);
+    while (ftell(file) + 8 <= fsize) {
+        uint8_t chunkId[4]; if (fread(chunkId, 1, 4, file) != 4) break;
+        uint8_t szBuf[4];   if (fread(szBuf, 1, 4, file) != 4) break;
         uint32_t chunkSize = szBuf[0] | (szBuf[1] << 8) | (szBuf[2] << 16) | (szBuf[3] << 24);
-        uint32_t nextChunkPos = file.position() + chunkSize + (chunkSize & 1); // Add padding byte if chunk size is odd
+        long nextChunkPos = ftell(file) + (long)chunkSize + (chunkSize & 1);
 
         if (strncmp((char*)chunkId, "fmt ", 4) == 0) {
             uint8_t fmt[16];
             int readLen = (chunkSize < 16) ? chunkSize : 16;
-            file.read(fmt, readLen);
+            if (fread(fmt, 1, readLen, file) != (size_t)readLen) break;
             tempChannels = fmt[2] | (fmt[3] << 8);
             tempSampleRate = fmt[4] | (fmt[5] << 8) | (fmt[6] << 16) | (fmt[7] << 24);
             tempBits = fmt[14] | (fmt[15] << 8);
-            file.seek(nextChunkPos);
-        } 
-        else if (strncmp((char*)chunkId, "data", 4) == 0) {
-            tempDataPos = file.position();
+            if (nextChunkPos > fsize) break;
+            fseek(file, nextChunkPos, SEEK_SET);
+        } else if (strncmp((char*)chunkId, "data", 4) == 0) {
+            tempDataPos = (uint32_t)ftell(file);
             tempDataSize = chunkSize;
             foundData = true;
-            break; 
-        } 
-        else { // Skip other chunks like LIST, etc.
-            if (nextChunkPos >= file.size() || chunkSize == 0) break; 
-            file.seek(nextChunkPos);
+            break;
+        } else {
+            if (nextChunkPos > fsize || chunkSize == 0) break;
+            fseek(file, nextChunkPos, SEEK_SET);
         }
     }
 
@@ -1562,12 +1572,12 @@ void ESP32Synth::sdLoaderTask(void* param) {
     ESP32Synth* synth = (ESP32Synth*)param;
     uint8_t tempBuf[2048] __attribute__((aligned(4)));
     
-   while(synth->_running) {
+    while(synth->_running) {
         bool needMoreYield = true;
 
         for (int i = 0; i < MAX_STREAMS; i++) {
             StreamTrack* trk = &synth->streams[i];
-            if (!trk->active || !trk->file) continue;
+            if (!trk->active || trk->file == NULL) continue;
             
             // Seek
             if (trk->seekTarget >= 0) {
@@ -1575,7 +1585,7 @@ void ESP32Synth::sdLoaderTask(void* param) {
                 if (bytesPerSample == 0) bytesPerSample = 2;
                 uint32_t targetByte = trk->dataStartPos + (trk->seekTarget * bytesPerSample);
                 if (targetByte < trk->dataStartPos + trk->dataSize) {
-                    trk->file.seek(targetByte);
+                    fseek(trk->file, (long)targetByte, SEEK_SET);
                     trk->samplesPlayed = trk->seekTarget;
                 }
                 trk->head = 0; trk->tail = 0; // Flush buffer
@@ -1603,11 +1613,12 @@ void ESP32Synth::sdLoaderTask(void* param) {
             
             // Loop / End check
             uint32_t absoluteEnd = trk->loop ? trk->loopEndBytes : (trk->dataStartPos + trk->dataSize);
-            if (trk->file.position() + bytesToRead > absoluteEnd) {
-                bytesToRead = absoluteEnd - trk->file.position();
+            long curPos = ftell(trk->file);
+            if ((uint32_t)curPos + bytesToRead > absoluteEnd) {
+                bytesToRead = (absoluteEnd > (uint32_t)curPos) ? (absoluteEnd - (uint32_t)curPos) : 0;
                 if(bytesToRead == 0) {
                     if(trk->loop) {
-                        trk->file.seek(trk->loopStartBytes);
+                        fseek(trk->file, (long)trk->loopStartBytes, SEEK_SET);
                         trk->samplesPlayed = (trk->loopStartBytes - trk->dataStartPos) / frameSize;
                     } else {
                         trk->playing = false;
@@ -1616,7 +1627,7 @@ void ESP32Synth::sdLoaderTask(void* param) {
                 }
             }
 
-            size_t bytesRead = (bytesToRead > 0) ? trk->file.read(tempBuf, bytesToRead) : 0;
+            size_t bytesRead = (bytesToRead > 0) ? fread(tempBuf, 1, bytesToRead, trk->file) : 0;
             
             if (bytesRead > 0) {
                 uint16_t framesRead = bytesRead / frameSize;
