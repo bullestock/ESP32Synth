@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <cstring>
 #include "esp_timer.h"
+#include "driver/gpio.h"
 
 // ====================================================================================
 //    SINE WAVE LOOK-UP TABLE
@@ -606,7 +607,7 @@ bool ESP32Synth::begin(int dataPin, SynthOutputMode mode, int clkPin, int wsPin,
         if (dac_continuous_enable(dac_handle) != ESP_OK) return false;
         #endif
     } else { // I2S or PDM
-        i2s_port_t requested_port = (mode == SMODE_PDM) ? I2S_NUM_0 : I2S_NUM_AUTO;
+        int requested_port = (mode == SMODE_PDM) ? I2S_NUM_0 : I2S_NUM_AUTO;
         i2s_chan_config_t chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG(requested_port, I2S_ROLE_MASTER);
         chan_cfg.dma_desc_num = 8;
         chan_cfg.dma_frame_num = 512;
@@ -617,7 +618,7 @@ bool ESP32Synth::begin(int dataPin, SynthOutputMode mode, int clkPin, int wsPin,
             i2s_pdm_tx_config_t pdm_cfg = {
                 .clk_cfg = I2S_PDM_TX_CLK_DEFAULT_CONFIG(_sampleRate),
                 .slot_cfg = I2S_PDM_TX_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_16BIT, I2S_SLOT_MODE_MONO),
-                .gpio_cfg = { .clk = (gpio_num_t) clkPin, .dout = (gpio_num_t) dataPin }
+                .gpio_cfg = { .clk = (gpio_num_t) clkPin, .dout = (gpio_num_t) dataPin, .invert_flags = { .clk_inv = 0 } }
             };
             if (i2s_channel_init_pdm_tx_mode(tx_handle, &pdm_cfg) != ESP_OK) return false;
         } else { // I2S
@@ -625,7 +626,7 @@ bool ESP32Synth::begin(int dataPin, SynthOutputMode mode, int clkPin, int wsPin,
             i2s_std_config_t std_cfg = {
                 .clk_cfg = I2S_STD_CLK_DEFAULT_CONFIG(_sampleRate),
                 .slot_cfg = I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(width, I2S_SLOT_MODE_STEREO),
-                .gpio_cfg = { .mclk = I2S_GPIO_UNUSED, .bclk = (gpio_num_t) clkPin, .ws = (gpio_num_t) wsPin, .dout = (gpio_num_t) dataPin }
+                .gpio_cfg = { .mclk = I2S_GPIO_UNUSED, .bclk = (gpio_num_t) clkPin, .ws = (gpio_num_t) wsPin, .dout = (gpio_num_t) dataPin, .din = I2S_GPIO_UNUSED, .invert_flags = { .mclk_inv = 0, .bclk_inv = 0, .ws_inv = 0 } }
             };
             if (i2s_channel_init_std_mode(tx_handle, &std_cfg) != ESP_OK) return false;
         }
@@ -1511,8 +1512,8 @@ bool ESP32Synth::parseWavHeader(FILE* file, uint32_t& outSampleRate, uint32_t& o
         for (long i = 0; i < maxSearch - 1; i++) {
             int c = fgetc(file);
             if (c == 'R') {
-                int c2 = fgetc(file);
-                if (c2 == 'I') {
+                int c2_ = fgetc(file);
+                if (c2_ == 'I') {
                     fseek(file, ftell(file) - 1, SEEK_SET);
                     if (fread(riff, 1, 12, file) == 12 && strncmp((char*)riff, "RIFF", 4) == 0) { foundRiff = true; break; }
                     fseek(file, ftell(file) - 11, SEEK_SET); // step back keeping scan progressing

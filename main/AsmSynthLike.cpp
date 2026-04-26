@@ -1,4 +1,4 @@
-#include "esp32synth/ESP32Synth.h"
+#include "ESP32Synth.h"
 #include "esp_heap_caps.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -48,7 +48,7 @@ extern "C" void IRAM_ATTR theAbyssDSP(int32_t* mixBuffer, int numSamples) {
 }
 
 static void setupSketch(){
-  synth.begin(4, 15, 2, I2S_32BIT); // matches Arduino sketch pins
+  synth.begin(19, 27, 25, I2S_32BIT); // matches Arduino sketch pins
   synth.setMasterVolume(200);
   abyssTape = (int32_t*)heap_caps_calloc(TAPE_LEN, sizeof(int32_t), MALLOC_CAP_8BIT | MALLOC_CAP_INTERNAL);
   synth.setCustomDSP(theAbyssDSP);

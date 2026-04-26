@@ -17,6 +17,12 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
+#ifndef PI
+#define PI 3.14159265358979323846
+#endif
+
+#include "ESP32SynthNotes.h"
+
 #if defined(CONFIG_IDF_TARGET_ESP32)
 #include "driver/dac_continuous.h"
 #endif
@@ -38,7 +44,7 @@
 #define MAX_SAMPLES 100 // default 100
 #define MAX_ARP_NOTES 16 // default 16
 #define MAX_STREAMS 4 // Max concurrent SD streams (RAM/CPU limited).
-#define STREAM_BUF_SAMPLES 0 // Ring buffer size (Must be power of 2).
+#define STREAM_BUF_SAMPLES 2048 // Ring buffer size (Must be power of 2).
 // */ 
 
  /* // Low ram usage (for LVGL, hi ram usage libs):
